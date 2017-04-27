@@ -2,40 +2,23 @@
 import sys
 import os
 import re
+from math import exp, log
 
-if (len(sys.argv) != 3):
-    print "You must provide 2 arguments: " + """program takes two paths as parameters:
-    path to the candidate translation (single file),
-    a path reference translations (single file, or a directory if there are multiple reference translations)"""
-    print "\nUsage: python calculatebleu.py /path/to/candidate /path/to/reference"
-    exit(1)
 
-ref_path = sys.argv[2]
-list_ref_files = []
-
-if os.path.isdir(ref_path):
-    for f in os.listdir(ref_path):
-        f_full_path = os.path.join(ref_path, f)
-        if os.path.isfile(f_full_path):
-            list_ref_files.append(f_full_path)
-
-else:
-    list_ref_files.append(ref_path)
-
-print list_ref_files
-exit(0)
-
-# with open(sys.argv[1], 'rb') as f_cand, open(sys.argv[2], 'rb') as f_ref:
-
+def get_file_lines(f_path):
+    with open(f_path, 'rb') as f:
+         lines = [line.strip() for line in f]
+    return lines
 
 def tokenize(sentence):
-    tokens = re.sub('[\W_]+', ' ', sentence, flags=re.UNICODE).lower().split()
+    # tokens = re.sub('[\W_]+', ' ', sentence, flags=re.UNICODE).lower().split()
+    tokens = sentence.lower().split()
     return tokens
 
 def concat_tokens(list_tokens):
     str = list_tokens[0]
     for token in list_tokens[1:]:
-        str += "-" + token
+        str += " " + token
     return str
 
 
@@ -69,12 +52,49 @@ def sum_clip_counts(dict_cand, list_dict_refs):
     return sum
 
 
-def modified_precision(cand_tokens, list_ref_tokens):
-    dict_cand = create_words_dict(cand_tokens)
-    list_dict_ref = [create_words_dict(ref_tokens) for ref_tokens in list_ref_tokens]
-    # print list_dict_ref
+def count_clip(cand_ngrams, list_ref_ngrams):
+    dict_cand = create_words_dict(cand_ngrams)
+    list_dict_ref = [create_words_dict(ref_tokens) for ref_tokens in list_ref_ngrams]
+    return sum_clip_counts(dict_cand, list_dict_ref)
 
-    return float(sum_clip_counts(dict_cand, list_dict_ref)) / float(len(cand_tokens))  #total_num_candidate_words = len(cand_tokens)
+
+def modified_precision_score(sum_count_clip_candidates, sum_count_candidates):
+    return float(sum_count_clip_candidates) / float(sum_count_candidates)
+
+def best_match_length(cand_words_length, list_ref_words_length):
+    best_match_diff = abs(cand_words_length - list_ref_words_length[0])
+    best_match = list_ref_words_length[0]
+
+    for j in range(1, len(list_ref_words_length)):
+        diff = abs(cand_words_length - list_ref_words_length[j])
+
+        if diff < best_match_diff:
+            best_match_diff = diff
+            best_match = list_ref_words_length[j]
+
+    return best_match
+
+
+def compute_modified_precision_score(cand_sentences, list_ref_sentences, n):
+    sum_count_clip_candidates = 0
+    sum_count_candidates = 0
+
+    for i in range(len(cand_sentences)):
+        cand_tokens = tokenize(cand_sentences[i])
+        list_ref_tokens = [tokenize(ref_sentences[i]) for ref_sentences in list_ref_sentences]
+
+        cand_grams = compute_grams(cand_tokens, n)
+        list_ref_grams = [compute_grams(ref_tokens, n) for ref_tokens in list_ref_tokens]
+        # print cand_grams
+        # print list_ref_tokens
+        # print count_clip(cand_tokens, list_ref_tokens)
+        # print
+        sum_count_clip_candidates += count_clip(cand_grams, list_ref_grams)
+        sum_count_candidates += len(cand_grams)
+
+    return modified_precision_score(sum_count_clip_candidates, sum_count_candidates)
+
+
 
 # Example 1
 candidate1 = "It is a guide to action which ensures that the military always obeys the commands of the party."
@@ -93,15 +113,56 @@ list_refs = [reference1, reference2, reference3]
 # list_refs = [reference1, reference2]
 
 
-N = 4
-for candidate in list_cand:
-    cand_tokens = compute_grams(tokenize(candidate), N)
+if __name__ == "__main__":
 
-    list_ref_tokens = [compute_grams(tokenize(ref), N) for ref in list_refs]
-    # print list_ref_tokens
-    print modified_precision(cand_tokens, list_ref_tokens)
+    if (len(sys.argv) != 3):
+        print "You must provide 2 arguments: " + """program takes two paths as parameters:
+        path to the candidate translation (single file),
+        a path reference translations (single file, or a directory if there are multiple reference translations)"""
+        print "\nUsage: python calculatebleu.py /path/to/candidate /path/to/reference"
+        exit(1)
 
-    # print compute_4grams(cand_tokens)
+    cand_path = sys.argv[1]
+    ref_path = sys.argv[2]
+    list_ref_files = []
+
+    if os.path.isdir(ref_path):
+        for f in os.listdir(ref_path):
+            f_full_path = os.path.join(ref_path, f)
+            if os.path.isfile(f_full_path):
+                list_ref_files.append(f_full_path)
+
+    else:
+        list_ref_files.append(ref_path)
+
+    # print list_ref_files
+
+    cand_sentences = get_file_lines(cand_path)
+    list_ref_sentences = [get_file_lines(ref_file) for ref_file in list_ref_files]
 
 
+    N = 4
+    c = 0
+    r = 0
+    weight = 1.0 / float(N)
+
+    for i in range(len(cand_sentences)):
+        cand_tokens = tokenize(cand_sentences[i])
+        list_ref_tokens = [tokenize(ref_sentences[i]) for ref_sentences in list_ref_sentences]
+        cand_words_length = len(cand_tokens)
+        list_ref_words_length = [len(ref_tokens) for ref_tokens in list_ref_tokens]
+        r += best_match_length(cand_words_length, list_ref_words_length)
+        c += cand_words_length
+
+    exp_arg = 0
+    for n in xrange(1, N + 1):
+        precision_score = compute_modified_precision_score(cand_sentences, list_ref_sentences, n)
+        # print precision_score
+        exp_arg += (weight * log(precision_score))
+
+    if c > r: brevity_penalty = 1
+    else: brevity_penalty = exp(1.0 - (float(r)/float(c)))
+
+    bleu = brevity_penalty * exp(exp_arg)
+    print bleu
 
