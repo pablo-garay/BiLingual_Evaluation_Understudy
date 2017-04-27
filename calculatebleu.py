@@ -75,16 +75,13 @@ def best_match_length(cand_words_length, list_ref_words_length):
     return best_match
 
 
-def compute_modified_precision_score(cand_sentences, list_ref_sentences, n):
+def compute_modified_precision_score(num_sentences, cand_tokens, list_ref_tokens, n):
     sum_count_clip_candidates = 0
     sum_count_candidates = 0
 
-    for i in range(len(cand_sentences)):
-        cand_tokens = tokenize(cand_sentences[i])
-        list_ref_tokens = [tokenize(ref_sentences[i]) for ref_sentences in list_ref_sentences]
-
-        cand_grams = compute_grams(cand_tokens, n)
-        list_ref_grams = [compute_grams(ref_tokens, n) for ref_tokens in list_ref_tokens]
+    for i in range(num_sentences):
+        cand_grams = compute_grams(cand_tokens[i], n)
+        list_ref_grams = [compute_grams(ref_tokens, n) for ref_tokens in list_ref_tokens[i]]
         # print cand_grams
         # print list_ref_tokens
         # print count_clip(cand_tokens, list_ref_tokens)
@@ -115,6 +112,7 @@ list_refs = [reference1, reference2, reference3]
 
 if __name__ == "__main__":
 
+    # get sentences from command line
     if (len(sys.argv) != 3):
         print "You must provide 2 arguments: " + """program takes two paths as parameters:
         path to the candidate translation (single file),
@@ -141,28 +139,36 @@ if __name__ == "__main__":
     list_ref_sentences = [get_file_lines(ref_file) for ref_file in list_ref_files]
 
 
+    # BLEU computation
     N = 4
     c = 0
     r = 0
     weight = 1.0 / float(N)
+    num_sentences = len(cand_sentences)
+    cand_tokens = [None] * num_sentences
+    list_ref_tokens = [None] * num_sentences
 
-    for i in range(len(cand_sentences)):
-        cand_tokens = tokenize(cand_sentences[i])
-        list_ref_tokens = [tokenize(ref_sentences[i]) for ref_sentences in list_ref_sentences]
-        cand_words_length = len(cand_tokens)
-        list_ref_words_length = [len(ref_tokens) for ref_tokens in list_ref_tokens]
+    for i in range(num_sentences): # for each sentence
+        cand_tokens[i] = tokenize(cand_sentences[i])
+        list_ref_tokens[i] = [tokenize(ref_sentences[i]) for ref_sentences in list_ref_sentences]
+
+        # values for BP (Brevity Penalty) computation
+        cand_words_length = len(cand_tokens[i])
+        list_ref_words_length = [len(ref_tokens) for ref_tokens in list_ref_tokens[i]]
         r += best_match_length(cand_words_length, list_ref_words_length)
         c += cand_words_length
 
     exp_arg = 0
     for n in xrange(1, N + 1):
-        precision_score = compute_modified_precision_score(cand_sentences, list_ref_sentences, n)
+        precision_score = compute_modified_precision_score(num_sentences, cand_tokens, list_ref_tokens, n)
         # print precision_score
         exp_arg += (weight * log(precision_score))
 
     if c > r: brevity_penalty = 1
     else: brevity_penalty = exp(1.0 - (float(r)/float(c)))
 
-    bleu = brevity_penalty * exp(exp_arg)
-    print bleu
+    bleu_score = brevity_penalty * exp(exp_arg)
+
+    with open("bleu_out.txt", "w") as outfile:
+        outfile.write(str(bleu_score))
 
